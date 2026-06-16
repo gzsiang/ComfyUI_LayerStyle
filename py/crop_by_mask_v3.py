@@ -86,6 +86,9 @@ class CropByMaskV3:
                 y1 = y1 - (height - (y2 - y1)) // 2
                 x2 = x1 + width
                 y2 = y1 + height
+            else:
+                width = x2 - x1
+                height = y2 - y1
 
             log(f"{self.NODE_NAME}: Box detected. x={x1},y={y1},width={width},height={height}")
             crop_box = (x1, y1, x2, y2)
