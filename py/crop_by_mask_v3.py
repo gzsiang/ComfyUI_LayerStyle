@@ -78,17 +78,16 @@ class CropByMaskV3:
             x2 = x + w + right_reserve if x + w + right_reserve < canvas_width else canvas_width
             y2 = y + h + bottom_reserve if y + h + bottom_reserve < canvas_height else canvas_height
 
+            width = x2 - x1
+            height = y2 - y1
             if round_to_multiple != 'None':
                 multiple = int(round_to_multiple)
-                width = num_round_up_to_multiple(x2 - x1, multiple)
-                height = num_round_up_to_multiple(y2 - y1, multiple)
+                width = num_round_up_to_multiple(width, multiple)
+                height = num_round_up_to_multiple(height, multiple)
                 x1 = x1 - (width - (x2 - x1)) // 2
                 y1 = y1 - (height - (y2 - y1)) // 2
                 x2 = x1 + width
                 y2 = y1 + height
-            else:
-                width = x2 - x1
-                height = y2 - y1
 
             log(f"{self.NODE_NAME}: Box detected. x={x1},y={y1},width={width},height={height}")
             crop_box = (x1, y1, x2, y2)
