@@ -1,7 +1,7 @@
 import torch
 
 from .imagefunc import log, tensor2pil, pil2tensor, mask2image, image2mask, gaussian_blur, min_bounding_rect, max_inscribed_rect, mask_area
-from .imagefunc import num_round_up_to_multiple, draw_rect
+from .imagefunc import num_round_up_to_multiple, draw_rect, ChunkedDiskStore
 
 
 
@@ -42,39 +42,37 @@ class CropByMaskV3:
                      crop_box=None
                      ):
 
-        ret_images = []
-        ret_masks = []
-        l_images = []
-        l_masks = []
+        store_img = ChunkedDiskStore()
+        store_mask = ChunkedDiskStore()
 
-        for l in image:
-            l_images.append(torch.unsqueeze(l, 0))
+        b_batch = image.shape[0]
+
+        # mask 预处理，只使用第一张
         if mask.dim() == 2:
             mask = torch.unsqueeze(mask, 0)
-        # 如果有多张mask输入，使用第一张
         if mask.shape[0] > 1:
             log(f"Warning: Multiple mask inputs, using the first.", message_type='warning')
             mask = torch.unsqueeze(mask[0], 0)
         if invert_mask:
             mask = 1 - mask
-        l_masks.append(tensor2pil(torch.unsqueeze(mask, 0)).convert('L'))
 
-        _mask = mask2image(mask)
+        _mask_pil = tensor2pil(mask).convert('L')
         preview_image = tensor2pil(mask).convert('RGBA')
+
         if crop_box is None:
-            bluredmask = gaussian_blur(_mask, 20).convert('L')
+            bluredmask = gaussian_blur(mask2image(mask), 20).convert('L')
             x = 0
             y = 0
-            width = 0
-            height = 0
+            w = 0
+            h = 0
             if detect == "min_bounding_rect":
                 (x, y, w, h) = min_bounding_rect(bluredmask)
             elif detect == "max_inscribed_rect":
                 (x, y, w, h) = max_inscribed_rect(bluredmask)
             else:
-                (x, y, w, h) = mask_area(_mask)
+                (x, y, w, h) = mask_area(_mask_pil)
 
-            canvas_width, canvas_height = tensor2pil(torch.unsqueeze(image[0], 0)).convert('RGBA').size
+            canvas_width, canvas_height = tensor2pil(image[0:1]).convert('RGBA').size
             x1 = x - left_reserve if x - left_reserve > 0 else 0
             y1 = y - top_reserve if y - top_reserve > 0 else 0
             x2 = x + w + right_reserve if x + w + right_reserve < canvas_width else canvas_width
@@ -97,14 +95,18 @@ class CropByMaskV3:
                                   crop_box[2] - crop_box[0], crop_box[3] - crop_box[1],
                                   line_color="#00F000",
                                   line_width=(crop_box[2] - crop_box[0] + crop_box[3] - crop_box[1]) // 200)
-        for i in range(len(l_images)):
-            _canvas = tensor2pil(l_images[i]).convert('RGBA')
-            _mask = l_masks[0]
-            ret_images.append(pil2tensor(_canvas.crop(crop_box)))
-            ret_masks.append(image2mask(_mask.crop(crop_box)))
 
-        log(f"{self.NODE_NAME} Processed {len(ret_images)} image(s).", message_type='finish')
-        return (torch.cat(ret_images, dim=0), torch.cat(ret_masks, dim=0), list(crop_box), pil2tensor(preview_image),)
+        for i in range(b_batch):
+            _canvas = tensor2pil(image[i:i+1]).convert('RGBA')
+            store_img.add(_canvas.crop(crop_box))
+            store_mask.add(_mask_pil.crop(crop_box))
+
+        log(f"{self.NODE_NAME} Processed.", message_type='finish')
+        result_img = store_img.to_tensor()
+        result_mask = store_mask.to_tensor()
+        store_img.cleanup()
+        store_mask.cleanup()
+        return (result_img, result_mask, list(crop_box), pil2tensor(preview_image),)
 
 
 NODE_CLASS_MAPPINGS = {
