@@ -1,6 +1,6 @@
 import torch
 from PIL import Image
-from .imagefunc import log, pil2tensor, tensor2pil, image2mask, mask2image, chop_image, chop_mode
+from .imagefunc import log, pil2tensor, tensor2pil, image2mask, mask2image, chop_image, chop_mode, ChunkedDiskStore
 
 
 
@@ -35,7 +35,7 @@ class ImageBlend:
                   layer_mask=None
                   ):
 
-        ret_images_pil = []
+        store = ChunkedDiskStore()
 
         b_batch = background_image.shape[0]
         l_batch = layer_image.shape[0]
@@ -72,10 +72,12 @@ class ImageBlend:
             _comp = chop_image(_canvas, _layer, blend_mode, opacity)
             _canvas.paste(_comp, mask=_mask)
 
-            ret_images_pil.append(_canvas)
+            store.add(_canvas)
 
-        log(f"{self.NODE_NAME} Processed {len(ret_images_pil)} image(s).", message_type='finish')
-        return (torch.cat([pil2tensor(img) for img in ret_images_pil], dim=0),)
+        log(f"{self.NODE_NAME} Processed.", message_type='finish')
+        result = store.to_tensor()
+        store.cleanup()
+        return (result,)
 
 NODE_CLASS_MAPPINGS = {
     "LayerUtility: ImageBlend": ImageBlend

@@ -1,6 +1,6 @@
 import torch
 from PIL import Image
-from .imagefunc import log, tensor2pil, pil2tensor, image2mask
+from .imagefunc import log, tensor2pil, pil2tensor, image2mask, ChunkedDiskStore
 
 
 
@@ -33,8 +33,8 @@ class RestoreCropBox:
                          croped_mask=None
                          ):
 
-        ret_images_pil = []  # 存 PIL（uint8），不存 float32 tensor，省 4 倍内存
-        ret_masks_pil = []
+        store_img = ChunkedDiskStore()
+        store_mask = ChunkedDiskStore()
 
         # croped_mask 预处理：确保是 3D
         if croped_mask is not None and croped_mask.dim() == 2:
@@ -46,7 +46,7 @@ class RestoreCropBox:
         max_batch = max(b_batch, l_batch, m_batch)
 
         for i in range(max_batch):
-            # 直接用索引取当前帧，不预收集到列表（通过 unsqueeze 创建 4D view，零拷贝）
+            # 直接用索引取当前帧，不预收集到列表
             b_idx = i if i < b_batch else b_batch - 1
             l_idx = i if i < l_batch else l_batch - 1
 
@@ -72,16 +72,15 @@ class RestoreCropBox:
             _canvas.paste(_layer, box=tuple(crop_box), mask=_mask)
             ret_mask.paste(_mask, box=tuple(crop_box))
 
-            # 存 PIL (uint8) 而非 tensor (float32)，减少 4 倍累积内存
-            ret_images_pil.append(_canvas)
-            ret_masks_pil.append(ret_mask)
+            store_img.add(_canvas)
+            store_mask.add(ret_mask)
 
-        log(f"{self.NODE_NAME} Processed {len(ret_images_pil)} image(s).", message_type='finish')
-        # 最后统一转换
-        return (
-            torch.cat([pil2tensor(img) for img in ret_images_pil], dim=0),
-            torch.cat([image2mask(mask) for mask in ret_masks_pil], dim=0),
-        )
+        log(f"{self.NODE_NAME} Processed.", message_type='finish')
+        result_img = store_img.to_tensor()
+        result_mask = store_mask.to_tensor()
+        store_img.cleanup()
+        store_mask.cleanup()
+        return (result_img, result_mask,)
 
 
 NODE_CLASS_MAPPINGS = {

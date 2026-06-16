@@ -1,7 +1,7 @@
 import torch
 import copy
 from PIL import Image
-from .imagefunc import log, pil2tensor, tensor2pil, image2mask, mask2image, chop_image_v2, chop_mode_v2, image_rotate_extend_with_alpha
+from .imagefunc import log, pil2tensor, tensor2pil, image2mask, mask2image, chop_image_v2, chop_mode_v2, image_rotate_extend_with_alpha, ChunkedDiskStore
 
 
 
@@ -46,8 +46,8 @@ class ImageBlendAdvanceV3:
                             transform_method, anti_aliasing, background_image=None, layer_mask=None
                             ):
 
-        ret_images_pil = []
-        ret_masks_pil = []
+        store_img = ChunkedDiskStore()
+        store_mask = ChunkedDiskStore()
 
         # 预先创建透明背景 PIL（不转 tensor），或直接用输入 tensor
         bg_pils = None
@@ -128,14 +128,15 @@ class ImageBlendAdvanceV3:
             # composition background
             _canvas.paste(_comp, mask=_compmask)
 
-            ret_images_pil.append(_canvas)
-            ret_masks_pil.append(_compmask)
+            store_img.add(_canvas)
+            store_mask.add(_compmask)
 
-        log(f"{self.NODE_NAME} Processed {len(ret_images_pil)} image(s).", message_type='finish')
-        return (
-            torch.cat([pil2tensor(img) for img in ret_images_pil], dim=0),
-            torch.cat([image2mask(m) for m in ret_masks_pil], dim=0),
-        )
+        log(f"{self.NODE_NAME} Processed.", message_type='finish')
+        result_img = store_img.to_tensor()
+        result_mask = store_mask.to_tensor()
+        store_img.cleanup()
+        store_mask.cleanup()
+        return (result_img, result_mask,)
 
 NODE_CLASS_MAPPINGS = {
     "LayerUtility: ImageBlendAdvance V3": ImageBlendAdvanceV3

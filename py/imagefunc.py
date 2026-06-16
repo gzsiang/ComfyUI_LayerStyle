@@ -2578,3 +2578,72 @@ minicpm_llama3_v25_prompts = """
         Your output should just be an plain list of descriptions. No numbers, no extraneous labels, no hyphens.
         Create only one prompt.
         """
+
+import os
+import shutil
+import tempfile
+try:
+    import folder_paths
+    LAYERSTYLE_CACHE_DIR = os.path.join(folder_paths.get_temp_directory(), "layerstyle_cache")
+except Exception:
+    LAYERSTYLE_CACHE_DIR = os.path.join(tempfile.gettempdir(), "layerstyle_cache")
+os.makedirs(LAYERSTYLE_CACHE_DIR, exist_ok=True)
+
+class ChunkedDiskStore:
+    """Chunked disk-backed frame accumulator.
+
+    Accumulates PIL frames in a small in-memory buffer. When the buffer
+    reaches ``chunk_size``, the chunk is serialised as a float16 tensor
+    to a file under ``LAYERSTYLE_CACHE_DIR``.  At the end call
+    ``.to_tensor()`` to load all chunks and concatenate them into a
+    single float32 batch tensor.
+
+    This keeps the memory footprint during a long batch run at roughly
+    ``chunk_size`` frames (PIL) + 1 chunk file (float16) instead of
+    holding the entire batch in RAM.
+    """
+
+    def __init__(self, chunk_size: int = 32):
+        self.chunk_dir = tempfile.mkdtemp(dir=LAYERSTYLE_CACHE_DIR)
+        self.chunk_size = chunk_size
+        self._buf: list = []
+        self._index = 0
+
+    def add(self, pil_image: Image.Image) -> None:
+        """Queue a PIL frame.  Automatically flush when buffer is full."""
+        self._buf.append(pil_image)
+        if len(self._buf) >= self.chunk_size:
+            self._flush()
+
+    def _flush(self) -> None:
+        """Convert buffer to a float16 tensor and save to disk."""
+        if not self._buf:
+            return
+        path = os.path.join(self.chunk_dir, f"{self._index:04d}.pt")
+        chunk = torch.cat([pil2tensor(img).half() for img in self._buf], dim=0)
+        torch.save(chunk, path)
+        self._buf.clear()
+        self._index += 1
+
+    def to_tensor(self) -> torch.Tensor:
+        """Flush remaining frames, load all chunks and return a float32 tensor."""
+        self._flush()
+        files = sorted(os.listdir(self.chunk_dir))
+        if not files:
+            return torch.empty(0)
+        chunks = []
+        for f in files:
+            path = os.path.join(self.chunk_dir, f)
+            chunks.append(torch.load(path, weights_only=True).float())
+        return torch.cat(chunks, dim=0)
+
+    def cleanup(self) -> None:
+        """Remove the temporary directory and all chunk files."""
+        self._buf.clear()
+        shutil.rmtree(self.chunk_dir, ignore_errors=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.cleanup()
