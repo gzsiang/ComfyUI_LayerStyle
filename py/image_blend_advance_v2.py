@@ -56,6 +56,8 @@ class ImageBlendAdvanceV2:
         l_batch = layer_image.shape[0]
         m_batch = layer_mask.shape[0] if layer_mask is not None else 0
         max_batch = max(b_batch, l_batch, m_batch)
+        store_img.reserve(max_batch)
+        store_mask.reserve(max_batch)
 
         for i in range(max_batch):
             b_idx = i if i < b_batch else b_batch - 1

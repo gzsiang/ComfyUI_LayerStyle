@@ -44,6 +44,8 @@ class RestoreCropBox:
         l_batch = croped_image.shape[0]
         m_batch = croped_mask.shape[0] if croped_mask is not None else 0
         max_batch = max(b_batch, l_batch, m_batch)
+        store_img.reserve(max_batch)
+        store_mask.reserve(max_batch)
 
         for i in range(max_batch):
             # 直接用索引取当前帧，不预收集到列表

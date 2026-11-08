@@ -46,6 +46,8 @@ class CropByMaskV3:
         store_mask = ChunkedDiskStore()
 
         b_batch = image.shape[0]
+        store_img.reserve(b_batch)
+        store_mask.reserve(b_batch)
 
         # mask 预处理，只使用第一张
         if mask.dim() == 2:

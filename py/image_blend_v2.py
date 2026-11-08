@@ -36,27 +36,34 @@ class ImageBlendV2:
                   layer_mask=None
                   ):
 
-        store = ChunkedDiskStore()
-
         b_batch = background_image.shape[0]
         l_batch = layer_image.shape[0]
         m_batch = layer_mask.shape[0] if layer_mask is not None else 0
         max_batch = max(b_batch, l_batch, m_batch)
 
+        # 预分配整段输出，避免逐帧缓冲 + 落盘 + 末尾整批 cat 造成的双倍峰值内存
+        store = ChunkedDiskStore(total_frames=max_batch)
+
         for i in range(max_batch):
             b_idx = i if i < b_batch else b_batch - 1
             l_idx = i if i < l_batch else l_batch - 1
 
-            _canvas = tensor2pil(background_image[b_idx:b_idx+1]).convert('RGB')
+            # tensor2pil 对 3 通道输入已经返回 RGB/L；只在确实不是目标模式时才转换，
+            # PIL 的 convert() 即使同模式也会整帧复制一次。
+            _canvas = tensor2pil(background_image[b_idx:b_idx+1])
+            if _canvas.mode != 'RGB':
+                _canvas = _canvas.convert('RGB')
             _layer_full = tensor2pil(layer_image[l_idx:l_idx+1])
-            _layer = _layer_full.convert('RGB')
+            _layer = _layer_full if _layer_full.mode == 'RGB' else _layer_full.convert('RGB')
 
             if layer_mask is not None:
                 m_idx = i if i < m_batch else m_batch - 1
                 _m = layer_mask[m_idx:m_idx+1]
                 if invert_mask:
                     _m = 1 - _m
-                _mask = tensor2pil(_m).convert('L')
+                _mask = tensor2pil(_m)
+                if _mask.mode != 'L':
+                    _mask = _mask.convert('L')
             else:
                 if _layer_full.mode == 'RGBA':
                     _mask = _layer_full.split()[-1]

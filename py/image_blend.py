@@ -41,6 +41,7 @@ class ImageBlend:
         l_batch = layer_image.shape[0]
         m_batch = layer_mask.shape[0] if layer_mask is not None else 0
         max_batch = max(b_batch, l_batch, m_batch)
+        store.reserve(max_batch)
 
         for i in range(max_batch):
             # 直接索引，不预收集
